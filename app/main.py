@@ -27,10 +27,9 @@ class PeT():
         self.lat = None
         self.lng = None
         self.dataset = None
-        self.duplicate_distances = {}
         self.current_channel_and_angle = [None, None]
         self.address = None
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.client_socket = None
         self.tv_controller = None
 
     # Seta a localizacao do usuario
@@ -39,10 +38,7 @@ class PeT():
 
     # Define a lista de canais segundo ANATEL.
     def set_dataset(self):
-        cgpb = pd.DataFrame({'Canal':[3,7,9,11,13,19,23,40], 
-                             'Entidade':['TV Paraíba','TV Bandeirantes','TV Borborema','TV Maior','TV Correios','TV Itararé','Rede Vida','TV Arapuan'],
-                             'Latitude':[-7.196070686076691,-7.123883803736,-7.217070207424,-7.222914069005,-7.122831775000,-7.237743934188,-7.123883803736,-7.213289372426],
-                             'Longitude':[-35.89568718950067,-34.876077492192,-35.885146445421,-35.881199368674,-34.877917127244,-35.878669875343,-34.876077492192,-35.892873245577]})
+        cgpb = pd.read_csv('canaispet.csv')
         self.dataset = cgpb
 
     # Calcula o angulo entre dois pontos, usando o norte como referencia
@@ -57,58 +53,53 @@ class PeT():
     # Calcula a angulacao da antena com base no canal seleiconado
     def set_positioning(self, channel):
         row = self.dataset.loc[self.dataset['Canal'] == channel]
-        channel_name = [nome for nome in row.loc[row['Canal'] == channel]["Entidade"]][0]
+        latitude, longitude = self.get_coordinate(row, "Latitude"), self.get_coordinate(row, "Longitude")
+        angle = self.get_bearingangle(latitude, longitude)
 
-        if channel_name in self.duplicate_distances:
-            angle = self.get_bearingangle(self.duplicate_distances[channel_name][2],self.duplicate_distances[channel_name][3])
-            self.current_channel_and_angle[0], self.current_channel_and_angle[1] = channel, angle
+        self.current_channel_and_angle[0], self.current_channel_and_angle[1] = channel, angle
 
-            return angle
-        else:
-            angle = self.get_bearingangle(float(row["Latitude"]), float(row["Longitude"]))
-            self.current_channel_and_angle[0], self.current_channel_and_angle[1] = channel, angle
+        return angle
 
-            return angle
-
-    # Busca o servidor broadcast
-    def find_server(self, sock):
+    # Funcao auxiliar para formatacao da coordenada
+    def get_coordinate(self, row, column):
+        return float(row[column].values[0].replace(',', "."))
+    
+    def send_to_server(self, sock, angle):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        delay = 1  
+        delay = 5  
         mb = 65535
 
         while True:
-            sock.sendto(b"DISCOVERY", ('192.168.0.255',53530))
+            sock.sendto(angle.encode(), ('192.168.0.255',53530))
             sock.settimeout(delay)
-            
+
             try:
                 data , address = sock.recvfrom(mb)
             except socket.timeout:
-                delay = delay + 1
+                print("Enviando angulo...")
             else:
                 break
+
+        print("Angulo enviado para {}".format(address))
         
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0)
         
         sock.settimeout(0.0)
-        
-        return address
 
     # Estabelece um socket de conexao com o ESP via broadcast
     def set_espsocket(self):
-        sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-        #self.address = (self.find_server(sock)[0],53540)
-        self.address = ("127.0.0.1",53540)
-
-        time.sleep(1)
-        print("Conectando-se a {}".format(self.address))
-        self.client_socket.connect(self.address)
+        self.client_socket = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 
     # Estabelece um socket de conexao com a TV
     def set_tvsocket(self, tv_address):
         config = {"name": "samsungctl","description": "PC","id": "","host": tv_address,"port": 55000,"method": "legacy","timeout": 0,}
         print("Configuração do controle:{}".format(config))
         print("self.tv_controller = samsungctl.Remote(config)")
-        #self.tv_controller = samsungctl.Remote(config)
+        self.tv_controller = config
+        self.tv_controller = samsungctl.Remote(config)
+
+    def sair(self):
+        self.send_to_server(self.client_socket,"0.0")
         
 # [HUD Instance]
 class MainWindow(Screen):
@@ -116,8 +107,11 @@ class MainWindow(Screen):
 
     # Inicializa as conexoes com ESP (broadcast) e TV (Direta)
     def set_connections(self):
-        PCore.set_espsocket()
-        PCore.set_tvsocket(self.tvip.text)
+        if PCore.address == None:
+            PCore.set_espsocket()
+        
+        if PCore.tv_controller == None:
+            PCore.set_tvsocket(self.tvip.text)
 
 class SecondWindow(Screen):
     channel_list = ""
@@ -131,8 +125,8 @@ class SecondWindow(Screen):
     def set_channel(self):
         # Envia o canal para a TV
         for channel in self.channel_list:
-            print("PCore.tv_controller.control(\"KEY_{}\".format(channel))".format(channel))
-            #PCore.tv_controller.control("KEY_{}".format(channel))
+            print("PCore.tv_controller.control(\"KEY_{}\")".format(channel))
+            PCore.tv_controller.control("KEY_{}".format(channel))
             time.sleep(0.5)
 
         # Envia o angulo calculado para o ESP
@@ -140,7 +134,7 @@ class SecondWindow(Screen):
             angle = str(np.floor(float(PCore.set_positioning(int(self.channel_list)))))
             self.channel_angle.text = angle
 
-            PCore.client_socket.sendall(angle.encode())
+            PCore.send_to_server(PCore.client_socket,angle)
         except IndexError:
             self.channel_angle.text = "Canal não encontrado"
             pass
@@ -149,6 +143,9 @@ class SecondWindow(Screen):
     # Limpa do ângulo printado
     def blank_menu(self):
         self.channel_angle.text = ""
+
+    def sair(self):
+        PCore.sair()
 
 class WindowManager(ScreenManager):
     pass
@@ -184,10 +181,8 @@ class MyApp(App):
         except NotImplementedError:
             import traceback
             traceback.print_exc()
-            # Retorno, por exemplo, caso tente rodar no PC (windows, linux, etc)
             self.gps_status = 'GPS is not implemented for your platform'
 
-        # Caso a plataforma seja um android, solicitar as permissões de acesso ao GPS
         if platform == "android":
             print("gps.py: Android detected. Requesting permissions")
             self.request_android_permissions()
@@ -228,5 +223,4 @@ class MyApp(App):
 if __name__ == "__main__":
     PCore = PeT()
     PCore.set_dataset()
-    PCore.set_location('-7.2399191559291545','-35.91621378231747')
     MyApp().run()

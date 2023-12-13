@@ -19,10 +19,10 @@ WindowManager:
                 size: self.size
 
         Label:
-            text: "PeTdroid"
+            text: "PeTCC"
             font_size: 30
             size: 100, 50
-            color: 1, 0.8235, 0.9019
+            color: 88, 88, 88
 
         GridLayout:
             cols:2
@@ -30,18 +30,25 @@ WindowManager:
                 text: "IP da TV: "
                 font_size: 30
                 size: 50, 30
-                color: 1, 0.8235, 0.9019
+                color: 88, 88, 88
             TextInput:
                 id: tvip
                 multinline: False
                 font_size: 30
                 size: 50, 30
 
-        ToggleButton:
-            text: 'GPS' if self.state == 'normal' else 'Stop'
-            on_state:
-                app.start(1000, 0) if self.state == 'down' else \
-                app.stop()
+        GridLayout:
+            cols:2
+            ToggleButton:
+                text: 'Ativar GPS' if self.state == 'normal' else 'Desativar GPS'
+                on_state:
+                    app.start(1000, 0) if self.state == 'down' else \
+                    app.stop()
+            ToggleButton:
+                text: 'Alterar canal primeiro' if self.state == 'normal' else 'Alterar angulação primeiro'
+                on_state:
+                    root.set_change_order(1) if self.state == 'down' else \
+                    root.set_change_order(0)
 
         Button:
             text: "Controle remoto"
@@ -50,6 +57,12 @@ WindowManager:
             on_release:
                 app.root.current = "Second"
                 root.manager.transition.direction = "left"
+
+<P>:
+    Label:
+        text: "Falha ao se conectar a TV."
+        size_hint: 0.6, 0.2
+        pos_hint: {"x":0.2, "top":1}
 
 <SecondWindow>:
     name: "Second"
@@ -71,18 +84,18 @@ WindowManager:
             text: "Canal/Angulação:"
             font_size: 30
             size: 100, 50
-            color: 1, 0.8235, 0.9019
+            color: 88, 88, 88
         Label:
             id: channel_angle
-            text: ""
+            text: "0"
             font_size: 30
             size: 100, 50
-            color: 1, 0.8235, 0.9019
+            color: 88, 88, 88
         Label:
             text: "°"
             font_size: 30
             size: 100, 50
-            color: 1, 0.8235, 0.9019
+            color: 88, 88, 88
 
         Button:
             text: "1"
@@ -143,7 +156,7 @@ WindowManager:
             font_size: 30
             size: 150, 100
             on_press: 
-                root.sair()
+                root.exit()
             on_release:
                 app.root.current = "Main"
                 root.blank_menu()

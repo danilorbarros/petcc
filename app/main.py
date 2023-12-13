@@ -20,6 +20,11 @@ from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.properties import ObjectProperty
+from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.popup import Popup
+
+ANGLE_FIRST=0
+CHANNEL_FIRST=1
 
 # [PeT Instance]
 class PeT():
@@ -31,6 +36,7 @@ class PeT():
         self.address = None
         self.client_socket = None
         self.tv_controller = None
+        self.change_order = CHANNEL_FIRST
 
     # Seta a localizacao do usuario
     def set_location(self, lat, lng):
@@ -69,18 +75,7 @@ class PeT():
         delay = 5  
         mb = 65535
 
-        while True:
-            sock.sendto(angle.encode(), ('192.168.0.255',53530))
-            sock.settimeout(delay)
-
-            try:
-                data , address = sock.recvfrom(mb)
-            except socket.timeout:
-                print("Enviando angulo...")
-            else:
-                break
-
-        print("Angulo enviado para {}".format(address))
+        sock.sendto(angle.encode(), ('192.168.0.255',53530))
         
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0)
         
@@ -94,12 +89,22 @@ class PeT():
     def set_tvsocket(self, tv_address):
         config = {"name": "samsungctl","description": "PC","id": "","host": tv_address,"port": 55000,"method": "legacy","timeout": 0,}
         print("Configuração do controle:{}".format(config))
-        print("self.tv_controller = samsungctl.Remote(config)")
-        self.tv_controller = config
-        self.tv_controller = samsungctl.Remote(config)
+        try:
+            self.tv_controller = samsungctl.Remote(config)
+        except ConnectionRefusedError:
+            self.show_popup("Conexao recusada.")
+            pass
+        except TimeoutError:
+            self.show_popup("Timeout na conexao.")
+            pass
 
-    def sair(self):
+    def exit(self):
         self.send_to_server(self.client_socket,"0.0")
+
+    def show_popup(self, msg):
+        show = P()
+        popupWindow = Popup(title="Mensagem de erro!", content=show, size_hint=(None,None),size=(400,400))
+        popupWindow.open()
         
 # [HUD Instance]
 class MainWindow(Screen):
@@ -110,8 +115,16 @@ class MainWindow(Screen):
         if PCore.address == None:
             PCore.set_espsocket()
         
-        if PCore.tv_controller == None:
+        if PCore.tv_controller == None and len(self.tvip.text) > 1:
             PCore.set_tvsocket(self.tvip.text)
+
+    def set_change_order(self, order):
+        if order == CHANNEL_FIRST:
+            print("PCore alterado para CHANNEL_FIRST")
+            PCore.change_order = CHANNEL_FIRST
+        elif order == ANGLE_FIRST:
+            print("PCore alterado para ANGLE_FIRST")
+            PCore.change_order = ANGLE_FIRST
 
 class SecondWindow(Screen):
     channel_list = ""
@@ -123,13 +136,26 @@ class SecondWindow(Screen):
 
     # Define o canal selecionado
     def set_channel(self):
-        # Envia o canal para a TV
-        for channel in self.channel_list:
-            print("PCore.tv_controller.control(\"KEY_{}\")".format(channel))
-            PCore.tv_controller.control("KEY_{}".format(channel))
-            time.sleep(0.5)
+        if PCore.change_order == CHANNEL_FIRST:
+            self.send_channel_tv()
+            self.send_channel_motor()
+        elif PCore.change_order == ANGLE_FIRST:
+            self.send_channel_motor()
+            self.send_channel_tv()
+        self.channel_list = ""
+        
+    def send_channel_tv(self):
+        print("Executando send_channel_tv().")
+        if PCore.tv_controller != None:
+            for channel in self.channel_list:
+                print("PCore.tv_controller.control(\"KEY_{}\")".format(channel))
+                PCore.tv_controller.control("KEY_{}".format(channel))
+                time.sleep(0.5)
+        else:
+            self.channel_angle.text = "TV não conectada."
 
-        # Envia o angulo calculado para o ESP
+    def send_channel_motor(self):
+        print("Executando send_channel_motor().")
         try:
             angle = str(np.floor(float(PCore.set_positioning(int(self.channel_list)))))
             self.channel_angle.text = angle
@@ -138,16 +164,18 @@ class SecondWindow(Screen):
         except IndexError:
             self.channel_angle.text = "Canal não encontrado"
             pass
-        self.channel_list = ""
 
     # Limpa do ângulo printado
     def blank_menu(self):
         self.channel_angle.text = ""
 
-    def sair(self):
-        PCore.sair()
+    def exit(self):
+        PCore.exit()
 
 class WindowManager(ScreenManager):
+    pass
+
+class P(FloatLayout):
     pass
 
 # Inicializacao da HUD
@@ -223,4 +251,5 @@ class MyApp(App):
 if __name__ == "__main__":
     PCore = PeT()
     PCore.set_dataset()
+    PCore.set_location('-7.240048279987186','-35.91610755911625')
     MyApp().run()

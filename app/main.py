@@ -251,5 +251,4 @@ class MyApp(App):
 if __name__ == "__main__":
     PCore = PeT()
     PCore.set_dataset()
-    PCore.set_location('-7.240048279987186','-35.91610755911625')
     MyApp().run()

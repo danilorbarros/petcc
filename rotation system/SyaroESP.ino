@@ -7,10 +7,13 @@
 #define SSID "brisa-2965238"
 #define PASSWD "nzjqyqln"
 #define BROADPORT 53530
+#define CONNECTPORT 53540
 
 // Stepper settings
+#define STEPSPERANGLE 1.8
 #define RADIO 360
 #define STEPS 200
+#define MAXLENGTH 5
 
 // Direction settings
 #define NORTH 0.0
@@ -34,18 +37,12 @@ bool client_conected;
 
 // Initialization
 AccelStepper stepper(motorInterfaceType, STEP, DIR);  // Stepper
+WiFiServer server(CONNECTPORT);                       // Server
 AsyncUDP udp;
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
-
-  // Stepper setup
-  stepper.setMaxSpeed(1000);
-  stepper.setSpeed(200);
-  stepper.setAcceleration(60);
-  stepper.setCurrentPosition(0);
-  north = stepper.currentPosition();
 
   // Broadcast setup
   client_conected = false;
@@ -87,21 +84,29 @@ void prepare_conection() {
 
         client_conected = true;
 
-        if (client_conected == true) 
-        {
-          string_recv = (char*) packet.data();
-          angle = string_recv.toFloat();
-          if ( angle == NORTH )
-          {
-            rotate_stepper(NORTH);
-          }
-          else
-          {
-            rotate_stepper(angle);
-          }
+        if (client_conected == true) {
+          WiFi.disconnect();
+          after_connected();
         }
       });
   }
+}
+
+void after_connected() {
+  WiFi.begin(SSID, PASSWD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(100);
+  }
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+  server.begin();
+
+  // Stepper setup
+  stepper.setMaxSpeed(1000);
+  stepper.setSpeed(200);
+  stepper.setAcceleration(60);
+  stepper.setCurrentPosition(0);
+  north = stepper.currentPosition();
 }
 
 void broadcast() {
@@ -115,6 +120,37 @@ void broadcast() {
 
 void loop() {
   broadcast();
+  WiFiClient client = server.available();
+  if (client) {
+    while (client.connected()) {
+      if (client.available() == 0) {
+        continue;
+      }
+
+      // string_recv will be constituted by each char_recv sent by the client
+      string_recv = "";
+      while (client.available() > 0 && string_recv.length() <= MAXLENGTH) {
+        char_recv = client.read();
+        string_recv += char_recv;
+      }
+
+      // convert string_recv to angle
+      if (client.available() == 0) {
+        Serial.print("angle: ");
+        angle = string_recv.toFloat();
+        Serial.println(angle);
+
+        client.flush();
+      }
+
+      // rotate stepper based on the received angle
+      rotate_stepper(angle);
+    }
+  }
+  // rotate stepper back to north
+  client.stop();
+  rotate_stepper(NORTH);
+  delay(5000);
 }
 
 void rotate_stepper(float angle) {
